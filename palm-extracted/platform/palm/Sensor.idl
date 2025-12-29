@@ -1,0 +1,40 @@
+/**
+ *******************************************************************************
+ *
+ * Copyright (c) 2011 Hewlett-Packard Development Company, L.P.
+ * All rights reserved.
+ *
+ * Created on Oct 5, 2011
+ *
+ *******************************************************************************
+ */
+
+module palm
+{
+        interface [
+            Conditional=WEBOS_SENSORS,
+            OmitConstructor,
+            EventTarget
+            ] Sensor {
+                /** Sensor Rate */
+                const unsigned short RATE_DEFAULT       = 0;
+                const unsigned short RATE_LOW           = 1;
+                const unsigned short RATE_MEDIUM        = 2;
+                const unsigned short RATE_HIGH          = 3;
+                const unsigned short RATE_HIGHEST       = 4;
+
+                /** Current data rate for the sensor */
+                attribute unsigned short currentRate;
+
+                /** Name of the sensor */
+                readonly attribute DOMString sensorName;
+
+                /** Sensor Management (Lifetime control) APIs */
+                void on();
+                void off();
+
+                /** Sensor Callbacks */
+                attribute [Custom] EventListener ondata;
+                attribute [Custom] EventListener onerror;
+        };
+}

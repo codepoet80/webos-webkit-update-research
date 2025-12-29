@@ -1,0 +1,38 @@
+/**
+ *******************************************************************************
+ *
+ * Copyright (c) 2011 Hewlett-Packard Development Company, L.P.
+ * All rights reserved.
+ *
+ * Created on Sep 29, 2011
+ *
+ *******************************************************************************
+ */
+
+module palm
+{
+        interface [
+            Conditional=WEBOS_SENSORS,
+            OmitConstructor,
+            EventTarget
+            ] SensorManager {
+                /** Available webOSSensors */
+                readonly attribute DOMString ACCELEROMETER;
+                readonly attribute DOMString ORIENTATION;
+                readonly attribute DOMString SHAKE;
+                readonly attribute DOMString ALS;
+                readonly attribute DOMString ANGULAR_VELOCITY;
+                readonly attribute DOMString COMPASS;
+                readonly attribute DOMString GRAVITY;
+                readonly attribute DOMString LINEAR_ACCELERATION;
+                readonly attribute DOMString MAGNETIC_FIELD;
+                readonly attribute DOMString SCREEN_PROXIMITY;
+                readonly attribute DOMString ROTATION;
+
+                /** Device sensor discovery */
+                DOMString getSupportedSensors();
+
+                /** Creates the sensor */
+                [V8Custom] Sensor createSensor(in DOMString sensor) raises(Exception);
+        };
+}

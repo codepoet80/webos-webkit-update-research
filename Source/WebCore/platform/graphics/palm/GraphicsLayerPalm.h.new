@@ -1,0 +1,158 @@
+/*
+ * Copyright (C) 2010 Google Inc. All rights reserved.
+ * Copyright (C) 2011 Palm, Inc. All rights reserved.
+ * Copyright (C) 2025 webOS Community. Ported to QtWebKit 2.3.4.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are
+ * met:
+ *
+ *     * Redistributions of source code must retain the above copyright
+ * notice, this list of conditions and the following disclaimer.
+ *     * Redistributions in binary form must reproduce the above
+ * copyright notice, this list of conditions and the following disclaimer
+ * in the documentation and/or other materials provided with the
+ * distribution.
+ *     * Neither the name of Google Inc. nor the names of its
+ * contributors may be used to endorse or promote products derived from
+ * this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+#ifndef GraphicsLayerPalm_h
+#define GraphicsLayerPalm_h
+
+#if USE(ACCELERATED_COMPOSITING)
+
+#include "GraphicsContext.h"
+#include "GraphicsLayer.h"
+#include "GraphicsLayerFactory.h"
+#include "PlatformLayer.h"
+
+namespace WebCore {
+
+class LayerPalm;
+
+// GraphicsLayerFactory for Palm platform
+class GraphicsLayerFactoryPalm : public GraphicsLayerFactory {
+public:
+    virtual PassOwnPtr<GraphicsLayer> createGraphicsLayer(GraphicsLayerClient*) OVERRIDE;
+};
+
+class GraphicsLayerPalm : public GraphicsLayer {
+public:
+    // Factory method - new API
+    static PassOwnPtr<GraphicsLayer> create(GraphicsLayerFactory*, GraphicsLayerClient*);
+
+    // Constructor - now protected, use factory
+    virtual ~GraphicsLayerPalm();
+
+    virtual void setName(const String&) OVERRIDE;
+
+    // for hosting this GraphicsLayer in a native layer hierarchy
+    virtual NativeLayer nativeLayer() const OVERRIDE;
+
+    virtual bool setChildren(const Vector<GraphicsLayer*>&) OVERRIDE;
+    virtual void addChild(GraphicsLayer*) OVERRIDE;
+    virtual void addChildAtIndex(GraphicsLayer*, int index) OVERRIDE;
+    virtual void addChildAbove(GraphicsLayer*, GraphicsLayer* sibling) OVERRIDE;
+    virtual void addChildBelow(GraphicsLayer*, GraphicsLayer* sibling) OVERRIDE;
+    virtual bool replaceChild(GraphicsLayer* oldChild, GraphicsLayer* newChild) OVERRIDE;
+
+    virtual void removeFromParent() OVERRIDE;
+
+    virtual void setPosition(const FloatPoint&) OVERRIDE;
+    virtual void setAnchorPoint(const FloatPoint3D&) OVERRIDE;
+    virtual void setSize(const FloatSize&) OVERRIDE;
+
+    virtual void setTransform(const TransformationMatrix&) OVERRIDE;
+
+    virtual void setChildrenTransform(const TransformationMatrix&) OVERRIDE;
+
+    virtual void setPreserves3D(bool) OVERRIDE;
+    virtual void setMasksToBounds(bool) OVERRIDE;
+    virtual void setDrawsContent(bool) OVERRIDE;
+
+    virtual void setBackgroundColor(const Color&) OVERRIDE;
+    virtual void clearBackgroundColor() OVERRIDE;
+
+    virtual void setContentsOpaque(bool) OVERRIDE;
+    virtual void setBackfaceVisibility(bool) OVERRIDE;
+
+    virtual void setOpacity(float) OVERRIDE;
+
+    virtual void setNeedsDisplay() OVERRIDE;
+    virtual void setNeedsDisplayInRect(const FloatRect&) OVERRIDE;
+    virtual void setContentsNeedsDisplay() OVERRIDE;
+
+    virtual void setContentsRect(const IntRect&) OVERRIDE;
+
+    virtual bool addAnimation(const KeyframeValueList&, const IntSize& boxSize, const Animation*, const String& animationName, double timeOffset) OVERRIDE;
+    virtual void pauseAnimation(const String& animationName, double timeOffset) OVERRIDE;
+    virtual void removeAnimation(const String& animationName) OVERRIDE;
+    virtual void suspendAnimations(double time) OVERRIDE;
+    virtual void resumeAnimations() OVERRIDE;
+
+    virtual void setContentsToImage(Image*) OVERRIDE;
+    virtual void setContentsToMedia(PlatformLayer*) OVERRIDE;
+    virtual void setContentsToCanvas(PlatformLayer*) OVERRIDE;
+
+    virtual PlatformLayer* platformLayer() const OVERRIDE;
+
+#if ENABLE(CSS_FILTERS)
+    virtual bool setFilters(const FilterOperations&) OVERRIDE;
+#endif
+
+    // Palm-specific methods
+    LayerPalm* platformLayerPalm() const { return m_layer.get(); }
+    void updateContentsRect();
+
+protected:
+    // Constructor - use factory method
+    GraphicsLayerPalm(GraphicsLayerClient*);
+
+private:
+    void updateLayerPosition();
+    void updateLayerSize();
+    void updateAnchorPoint();
+    void updateTransform();
+    void updateChildrenTransform();
+    void updateMasksToBounds();
+    void updateContentsOpaque();
+    void updateBackfaceVisibility();
+    void updateLayerPreserves3D();
+    void updateLayerDrawsContent();
+    void updateLayerBackgroundColor();
+
+    void updateContentsImage();
+    void updateContentsMedia();
+    void updateContentsCanvas();
+
+    void setupContentsLayer(LayerPalm*);
+    LayerPalm* contentsLayer() const { return m_contentsLayer.get(); }
+
+    OwnPtr<LayerPalm> m_layer;
+    OwnPtr<LayerPalm> m_contentsLayer;
+
+    Image* m_contentsImage;
+
+    bool m_contentsLayerPurpose;
+    bool m_inSetChildren;
+};
+
+} // namespace WebCore
+
+#endif // USE(ACCELERATED_COMPOSITING)
+
+#endif // GraphicsLayerPalm_h

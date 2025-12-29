@@ -1,0 +1,25 @@
+
+module palm {
+
+    interface [
+    	CanBeConstructed,
+    	CustomConstructFunction,
+    	V8CustomConstructor,
+    	CustomMarkFunction,
+    	EventTarget,
+		NoStaticTables
+			] PalmServiceBridge {
+
+        // event handler attributes
+        attribute [Custom] EventListener onservicecallback;
+		readonly attribute unsigned long token;
+
+        // request
+        unsigned long call(in DOMString method, in DOMString url)
+            raises(DOMException);
+
+        void cancel()
+			raises(DOMException);
+    };
+
+}
