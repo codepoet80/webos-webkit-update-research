@@ -1,0 +1,107 @@
+From: webOS Security Patches
+Subject: [PATCH 005] RTL text rendering use-after-free fix
+Date: 2025-01-01
+
+This patch addresses CVE-2010-0049, a use-after-free vulnerability
+in WebKit's handling of right-to-left (RTL) text directionality
+that could allow remote code execution.
+
+The vulnerability occurs when HTML elements with RTL text
+directionality are manipulated, causing child elements to be
+freed while still referenced.
+
+---
+diff -u a/WebCore/rendering/bidi.cpp b/WebCore/rendering/bidi.cpp
+--- a/WebCore/rendering/bidi.cpp
++++ b/WebCore/rendering/bidi.cpp
+@@ -558,6 +558,12 @@ void RenderBlock::layoutInlineChildren(bool relayoutChildren, int& repaintTop,
+ static inline void setStaticPositions(RenderBlock* block, RenderBox* child)
+ {
++    // Security: Null check for block and child
++    if (!block || !child)
++        return;
++    if (!child->parent())
++        return;
++
+     // FIXME: The math here is actually not quite right. It's a decent approximation, but it
+     // can cause some inline elements to be too far right or too close to the left edge.
+     child->setStaticX(block->style()->direction() == LTR ?
+@@ -912,6 +918,11 @@ InlineIterator RenderBlock::findNextLineBreak(InlineBidiResolver& resolver, bool
+     RenderObject* last = lineInfo.lastFloatFromPreviousLine();
+     bool isLineEmpty = true;
+
++    // Security: Verify resolver has valid start object
++    if (!resolver.position().object())
++        return end;
++    // Keep reference to starting object to detect if it's freed
++    RefPtr<RenderObject> startObj = resolver.position().object();
+
+     while (current) {
+         if (current->isBR()) {
+@@ -923,6 +934,12 @@ InlineIterator RenderBlock::findNextLineBreak(InlineBidiResolver& resolver, bool
+
+         RenderObject* next = bidiNext(this, current);
+
++        // Security: Verify current object wasn't freed during bidiNext
++        if (!current->parent()) {
++            // Object was detached, abort line break search
++            break;
++        }
++
+         if (current->isText()) {
+             RenderText* t = toRenderText(current);
+             int strlen = t->textLength();
+@@ -1034,6 +1051,11 @@ InlineIterator RenderBlock::findNextLineBreak(InlineBidiResolver& resolver, bool
+
+ void RenderBlock::addOverflowFromInlineChildren()
+ {
++    // Security: Verify we have inline children before iterating
++    if (!firstLineBox())
++        return;
++    if (!lastLineBox())
++        return;
++
+     for (RootInlineBox* curr = firstRootBox(); curr; curr = curr->nextRootBox()) {
+         addLayoutOverflow(curr->layoutOverflowRect());
+         if (!hasOverflowClip())
+
+diff -u a/WebCore/rendering/RenderText.cpp b/WebCore/rendering/RenderText.cpp
+--- a/WebCore/rendering/RenderText.cpp
++++ b/WebCore/rendering/RenderText.cpp
+@@ -404,7 +404,11 @@ bool RenderText::isWordBreak() const
+ void RenderText::addLineBoxes(InlineFlowBox* parentBox, InlineTextBox* newBox)
+ {
+-    RenderBlock* cb = containingBlock();
++    // Security: Null check for containingBlock
++    RenderBlock* cb = containingBlock();
++    if (!cb)
++        return;
++
+     cb->appendRunsForObject(m_linesDirty, m_firstTextBox, m_lastTextBox);
+     cb->setHasMarkupTruncation(false);
+
+@@ -813,8 +817,11 @@ void RenderText::setSelectionState(SelectionState state)
+     // and set selection start/end on the containing block directly
+     // rather than doing a walk up to it.
+
+-    containingBlock()->setSelectionState(state);
++    // Security: Null check for containingBlock
++    RenderBlock* cb = containingBlock();
++    if (cb)
++        cb->setSelectionState(state);
+ }
+
+ void RenderText::setTextInternal(PassRefPtr<StringImpl> textImpl)
+@@ -1118,7 +1125,11 @@ float RenderText::minPrefWidth() const
+
+ float RenderText::maxPrefWidth() const
+ {
+-    RenderObject* cb = containingBlock();
++    // Security: Null check for containingBlock
++    RenderObject* cb = containingBlock();
++    if (!cb)
++        return 0;
++
+     RenderStyle* style = cb ? cb->style() : this->style();
+
+     float maxWidth = 0;

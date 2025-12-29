@@ -1,0 +1,122 @@
+From: webOS Security Patches
+Subject: [PATCH 002] SVG animation use-after-free protections
+Date: 2025-01-01
+
+This patch addresses CVE-2011-0222, CVE-2011-0240, and similar
+use-after-free vulnerabilities in SVG animation code where DOM
+elements can be freed while still referenced in animation callbacks.
+
+Key fixes:
+- Add RefPtr protection for elements during animation callbacks
+- Null-check element pointers before use
+- Protect animVal/baseVal access patterns
+
+---
+diff -u a/WebCore/svg/animation/SMILTimeContainer.cpp b/WebCore/svg/animation/SMILTimeContainer.cpp
+--- a/WebCore/svg/animation/SMILTimeContainer.cpp
++++ b/WebCore/svg/animation/SMILTimeContainer.cpp
+@@ -26,6 +26,7 @@
+ #include "SMILTimeContainer.h"
+
+ #include "CSSComputedStyleDeclaration.h"
++#include "Document.h"
+ #include "CSSParser.h"
+ #include "SVGAnimationElement.h"
+ #include "SVGSMILElement.h"
+@@ -141,6 +142,11 @@ void SMILTimeContainer::updateAnimations(SMILTime elapsed)
+
+     Vector<SVGSMILElement*> toAnimate;
+     copyToVector(m_scheduledAnimations, toAnimate);
++
++    // Security: Keep document alive during animation processing
++    // to prevent use-after-free if animations modify DOM
++    RefPtr<Document> protectedDocument = m_ownerSVGElement ?
++        m_ownerSVGElement->document() : 0;
+
+     unsigned size = toAnimate.size();
+     for (unsigned n = 0; n < size; n++) {
+@@ -159,7 +165,12 @@ void SMILTimeContainer::updateAnimations(SMILTime elapsed)
+     Vector<SVGSMILElement*> animationsToApply;
+     for (unsigned i = 0; i < size; ++i) {
+         SVGSMILElement* animation = toAnimate[i];
++        // Security: Verify element is still valid after potential DOM modification
++        if (!animation || !animation->inDocument())
++            continue;
++
+         if (!animation->isContributing(elapsed))
+             continue;
++
+         animationsToApply.append(animation);
+     }
+
+@@ -168,10 +179,16 @@ void SMILTimeContainer::updateAnimations(SMILTime elapsed)
+     for (unsigned i = 0; i < animationsToApply.size(); ++i) {
+         if (SVGSMILElement* animation = animationsToApply[i]) {
+             SVGElement* targetElement = animation->targetElement();
+-            if (targetElement)
++            // Security: Verify target is still in document
++            if (targetElement && targetElement->inDocument()) {
+                 resultsElements.add(targetElement);
++            }
+         }
+     }
++
++    // Bail out if document was destroyed during processing
++    if (protectedDocument && !protectedDocument->frame())
++        return;
+
+     for (unsigned i = 0; i < animationsToApply.size(); ++i)
+         animationsToApply[i]->applyAnimation(resultsElements);
+
+diff -u a/WebCore/svg/SVGDocumentExtensions.cpp b/WebCore/svg/SVGDocumentExtensions.cpp
+--- a/WebCore/svg/SVGDocumentExtensions.cpp
++++ b/WebCore/svg/SVGDocumentExtensions.cpp
+@@ -75,6 +75,11 @@ void SVGDocumentExtensions::dispatchSVGLoadEventToOutermostSVGElements()
+         return;
+
+     Vector<RefPtr<SVGSVGElement> > elements;
++
++    // Security: Create RefPtr copies to prevent use-after-free
++    // if load handlers modify the DOM and remove SVG elements
++    RefPtr<Document> protectedDocument = m_doc;
++
+     HashMap<SVGSVGElement*, bool>::iterator end = svgElements.end();
+     for (HashMap<SVGSVGElement*, bool>::iterator it = svgElements.begin(); it != end; ++it) {
+         if (it->second) {
+@@ -85,6 +90,10 @@ void SVGDocumentExtensions::dispatchSVGLoadEventToOutermostSVGElements()
+
+     for (size_t i = 0; i < elements.size(); ++i) {
+         SVGSVGElement* outerSVG = elements[i].get();
++        // Security: Verify element is still in document
++        if (!outerSVG || !outerSVG->inDocument())
++            continue;
++
+         if (outerSVG && outerSVG->inDocument()) {
+             outerSVG->sendSVGLoadEventIfPossible(true);
+         }
+
+diff -u a/WebCore/svg/SVGUseElement.cpp b/WebCore/svg/SVGUseElement.cpp
+--- a/WebCore/svg/SVGUseElement.cpp
++++ b/WebCore/svg/SVGUseElement.cpp
+@@ -360,6 +360,10 @@ void SVGUseElement::buildPendingResource()
+     if (m_needsShadowTreeRecreation)
+         m_needsShadowTreeRecreation = false;
+
++    // Security: Ensure we have a valid document before proceeding
++    if (!document() || !inDocument())
++        return;
++
+     String id = SVGURIReference::getTarget(href());
+     Element* targetElement = document()->getElementById(id);
+
+@@ -387,6 +391,10 @@ void SVGUseElement::buildPendingResource()
+ void SVGUseElement::buildShadowAndInstanceTree(SVGShadowTreeRootElement* shadowRoot)
+ {
+     String id = SVGURIReference::getTarget(href());
++    // Security: Null check for document
++    if (!document())
++        return;
++
+     Element* targetElement = document()->getElementById(id);
+     if (!targetElement) {
+         // The only time we should get here is when the use element has not

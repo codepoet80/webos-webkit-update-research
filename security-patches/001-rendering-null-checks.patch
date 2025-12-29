@@ -1,0 +1,127 @@
+From: webOS Security Patches
+Subject: [PATCH 001] Fix null pointer dereferences in rendering code
+Date: 2025-01-01
+
+This patch addresses CVE-2010-1813 and similar memory corruption
+vulnerabilities in the rendering pipeline where containingBlock()
+can return null but the return value is dereferenced without checks.
+
+Affected areas:
+- RenderBlock::paintContinuationOutlines()
+- RenderTreeAsText (debugging/test code)
+- InlineTextBox::paint()
+
+---
+diff -u a/WebCore/rendering/RenderBlock.cpp b/WebCore/rendering/RenderBlock.cpp
+--- a/WebCore/rendering/RenderBlock.cpp
++++ b/WebCore/rendering/RenderBlock.cpp
+@@ -1723,10 +1723,14 @@ void RenderBlock::paintObject(PaintInfo& paintInfo, int tx, int ty)
+             RenderInline* inlineRenderer = toRenderInline(inlineFlow->node()->renderer());
+             if (inlineRenderer != inlineFlow) {
+                 // Renderers changed, likely due to reattach - use the new one
+-                containingBlock()->addContinuationWithOutline(inlineRenderer);
+-            else if (!inlineRenderer->firstLineBox())
+-                inlineRenderer->paintOutline(paintInfo.context, tx - x() + inlineRenderer->containingBlock()->x(),
+-                                             ty - y() + inlineRenderer->containingBlock()->y());
++                RenderBlock* cb = containingBlock();
++                if (cb)
++                    cb->addContinuationWithOutline(inlineRenderer);
++            } else if (!inlineRenderer->firstLineBox()) {
++                RenderBlock* cb = inlineRenderer->containingBlock();
++                if (cb)
++                    inlineRenderer->paintOutline(paintInfo.context, tx - x() + cb->x(),
++                                                 ty - y() + cb->y());
++            }
+         }
+         paintContinuationOutlines(paintInfo, tx, ty);
+     }
+@@ -1830,6 +1834,8 @@ void RenderBlock::paintContinuationOutlines(PaintInfo& info, int tx, int ty)
+     for (ListHashSet<RenderInline*>::iterator it = continuations->begin(); it != end; ++it) {
+         // Need to add in the coordinates of the intervening blocks.
+         RenderInline* flow = *it;
++        if (!flow)
++            continue;
+         RenderBlock* block = flow->containingBlock();
+         for ( ; block && block != this; block = block->containingBlock()) {
+             tx += block->x();
+@@ -1837,6 +1843,11 @@ void RenderBlock::paintContinuationOutlines(PaintInfo& info, int tx, int ty)
+         }
+-        ASSERT(block);
+-        flow->paintOutline(info.context, tx, ty);
++        // Security fix: Check block is valid before proceeding
++        // This can be null if the render tree changed during iteration
++        if (block) {
++            flow->paintOutline(info.context, tx, ty);
++        } else {
++            // Block chain broken - skip this outline
++        }
+     }
+
+     // Delete
+
+diff -u a/WebCore/rendering/RenderTreeAsText.cpp b/WebCore/rendering/RenderTreeAsText.cpp
+--- a/WebCore/rendering/RenderTreeAsText.cpp
++++ b/WebCore/rendering/RenderTreeAsText.cpp
+@@ -184,7 +184,9 @@ static void writeRenderObject(TextStream& ts, const RenderObject& o, RenderBeha
+         }
+     }
+
+-    bool adjustForTableCells = o.containingBlock()->isTableCell();
++    // Security fix: containingBlock() can return null
++    RenderBlock* cb = o.containingBlock();
++    bool adjustForTableCells = cb && cb->isTableCell();
+
+     IntRect r;
+     if (o.isText()) {
+@@ -211,7 +213,8 @@ static void writeRenderObject(TextStream& ts, const RenderObject& o, RenderBeha
+
+     // FIXME: Temporary in order to ensure compatibility with existing layout test results.
+     if (adjustForTableCells)
+-        r.move(0, -toRenderTableCell(o.containingBlock())->intrinsicPaddingTop());
++        if (cb)
++            r.move(0, -toRenderTableCell(cb)->intrinsicPaddingTop());
+
+     ts << " " << r;
+
+@@ -342,9 +345,11 @@ static void write(TextStream& ts, const RenderObject& o, int indent, RenderAsTe
+         writeTextRun(ts, text, *run);
+     }
+
+-    if (o.containingBlock()->isTableCell())
+-        y -= toRenderTableCell(o.containingBlock())->intrinsicPaddingTop();
+-
++    // Security fix: containingBlock() can return null
++    RenderBlock* cb = o.containingBlock();
++    if (cb && cb->isTableCell())
++        y -= toRenderTableCell(cb)->intrinsicPaddingTop();
++
+     if (!o.isText()) {
+         if (o.parent() && o.parent()->childrenInline() && o.isRenderInline()) {
+
+diff -u a/WebCore/rendering/InlineTextBox.cpp b/WebCore/rendering/InlineTextBox.cpp
+--- a/WebCore/rendering/InlineTextBox.cpp
++++ b/WebCore/rendering/InlineTextBox.cpp
+@@ -330,7 +330,11 @@ void InlineTextBox::paint(RenderObject::PaintInfo& paintInfo, int tx, int ty)
+         return;
+
+     if (m_truncation != cNoTruncation) {
+-        TextDirection flowDirection = renderer()->containingBlock()->style()->direction();
++        // Security fix: containingBlock() can return null in edge cases
++        RenderBlock* cb = renderer()->containingBlock();
++        if (!cb)
++            return;
++        TextDirection flowDirection = cb->style()->direction();
+         if (flowDirection != direction()) {
+             // Make the visible fragment of text hug the edge closest to the rest of the run by moving the origin
+             // at which we start drawing text.
+@@ -936,7 +940,9 @@ void InlineTextBox::paintCompositionBackground(GraphicsContext* context, int tx
+
+ void InlineTextBox::paintDecoration(GraphicsContext* context, int tx, int ty, int deco, ShadowData* shadow)
+ {
+-    RenderBlock *blockElement = renderer()->containingBlock();
++    RenderBlock* blockElement = renderer()->containingBlock();
++    if (!blockElement)
++        return;
+
+     // Get the text decoration colors.
+     Color underline, overline, linethrough;
