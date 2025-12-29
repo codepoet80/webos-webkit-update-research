@@ -1,0 +1,125 @@
+From: webOS Security Patches
+Subject: [PATCH 004] XSS and DOM security hardening
+Date: 2025-01-01
+
+This patch addresses CVE-2009-1684, CVE-2009-1695, and similar
+cross-site scripting vulnerabilities by hardening event handler
+execution, frame access controls, and DOM manipulation safety.
+
+---
+diff -u a/WebCore/bindings/v8/ScriptController.cpp b/WebCore/bindings/v8/ScriptController.cpp
+--- a/WebCore/bindings/v8/ScriptController.cpp
++++ b/WebCore/bindings/v8/ScriptController.cpp
+@@ -283,6 +283,14 @@ bool ScriptController::shouldBypassMainWorldContentSecurityPolicy()
+ ScriptValue ScriptController::executeScript(const ScriptSourceCode& sourceCode)
+ {
+     if (!m_frame)
+         return ScriptValue();
++
++    // Security: Verify frame is still in a valid document
++    if (!m_frame->document())
++        return ScriptValue();
++
++    // Security: Check if scripts are allowed
++    if (!canExecuteScripts())
++        return ScriptValue();
+
+     return evaluateScript(sourceCode);
+ }
+@@ -348,6 +356,12 @@ void ScriptController::clearScriptObjects()
+
+ void ScriptController::updateSecurityOrigin()
+ {
++    // Security: Null checks for frame and document
++    if (!m_frame || !m_frame->document())
++        return;
++    if (!m_frame->document()->securityOrigin())
++        return;
++
+     // Use the cached context if this function was called via
+     // document.open(). In that case we need to update the cached
+     // context's security origin to the newly set origin.
+
+diff -u a/WebCore/dom/Document.cpp b/WebCore/dom/Document.cpp
+--- a/WebCore/dom/Document.cpp
++++ b/WebCore/dom/Document.cpp
+@@ -1584,6 +1584,15 @@ void Document::setURL(const KURL& url)
+ void Document::updateBaseURL()
+ {
++    // Security: Validate URL is not a javascript: URL being set as base
++    // This could enable XSS if allowed
++    KURL baseURL = m_baseElementURL.isEmpty() ? m_url : m_baseElementURL;
++    if (protocolIsJavaScript(baseURL.string())) {
++        // Reject javascript: as base URL
++        m_baseURL = m_url;
++        return;
++    }
++
+     // DOM 3 Core: When the Document supports the feature "HTML" [DOM Level 2 HTML],
+     // the base URI is computed using first the value of the href attribute of the
+     // HTML BASE element if any, and the value of the documentURI attribute from the
+@@ -3123,6 +3132,14 @@ PassRefPtr<Event> Document::createEvent(const String& eventType, ExceptionCode&
+ void Document::setBodyInlineStyle(const String& style)
+ {
++    // Security: Validate we have a body and it's in this document
++    if (!body())
++        return;
++    if (body()->document() != this)
++        return;
++    // Security: Limit inline style length to prevent DoS
++    if (style.length() > 65536)
++        return;
++
+     if (body())
+         body()->setAttribute(styleAttr, style);
+ }
+
+diff -u a/WebCore/dom/Node.cpp b/WebCore/dom/Node.cpp
+--- a/WebCore/dom/Node.cpp
++++ b/WebCore/dom/Node.cpp
+@@ -2155,6 +2155,16 @@ void Node::dispatchSubtreeModifiedEvent()
+ void Node::dispatchUIEvent(const AtomicString& eventType, int detail, PassRefPtr<Event> underlyingEvent)
+ {
++    // Security: Verify node is still in a document before dispatching
++    if (!document())
++        return;
++
++    // Security: Verify document has a valid frame
++    // to prevent use-after-free on detached documents
++    Document* doc = document();
++    if (!doc->frame() && eventType != eventNames().DOMContentLoadedEvent)
++        return;
++
+     ASSERT(!eventDispatchForbidden());
+     ASSERT(googEventType.length() > 0);
+
+@@ -2256,6 +2266,12 @@ bool Node::dispatchEvent(PassRefPtr<Event> prpEvent)
+
+ void Node::dispatchGenericEvent(PassRefPtr<Event> prpEvent)
+ {
++    // Security: Validate event and node state
++    if (!prpEvent)
++        return;
++    if (!document())
++        return;
++
+     ASSERT(!eventDispatchForbidden());
+     RefPtr<Event> event(prpEvent);
+
+diff -u a/WebCore/html/HTMLFrameElementBase.cpp b/WebCore/html/HTMLFrameElementBase.cpp
+--- a/WebCore/html/HTMLFrameElementBase.cpp
++++ b/WebCore/html/HTMLFrameElementBase.cpp
+@@ -201,6 +201,15 @@ void HTMLFrameElementBase::setLocation(const String& str)
+ bool HTMLFrameElementBase::isFocusable() const
+ {
++    // Security: Validate contentDocument access
++    if (contentDocument()) {
++        // Verify same-origin before allowing focus
++        Document* doc = document();
++        if (doc && doc->securityOrigin() &&
++            !doc->securityOrigin()->canAccess(contentDocument()->securityOrigin()))
++            return false;
++    }
++
+     return HTMLFrameOwnerElement::isFocusable();
+ }
